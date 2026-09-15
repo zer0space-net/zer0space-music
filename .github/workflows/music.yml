@@ -1,0 +1,142 @@
+name: Build music image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'static/**'
+      - 'templates/**'
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - '.github/workflows/music.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'static/**'
+      - 'templates/**'
+      - 'requirements.txt'
+  workflow_dispatch:
+
+# Least privilege by default: the check job runs `pip install` against the PR's
+# own requirements.txt, which executes arbitrary code from a package's build
+# backend. The build job re-grants packages: write for itself.
+permissions:
+  contents: read
+
+jobs:
+  # There is no test suite yet, so this is what stands between a typo and a
+  # container that crash-loops on the cluster.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # Third-party actions are pinned to commit SHAs, not moving major tags:
+      # a tag is repointable by whoever controls the action's repository.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Byte-compile all sources
+        run: python -m compileall -q src
+
+      - name: Import the application
+        # DB_HOST points nowhere on purpose — importing must not need a database.
+        env:
+          DB_HOST: 127.0.0.1
+          MUSIC_SERVICE_TOKEN: ci-only-not-a-real-secret
+          MUSIC_STREAM_SECRET: ci-only-not-a-real-secret
+        run: python -c "from src.main import app; print(f'{len(app.routes)} routes registered')"
+
+      - name: Parse every Jinja template
+        run: |
+          python - <<'PY'
+          from jinja2 import Environment, FileSystemLoader
+          from pathlib import Path
+          env = Environment(loader=FileSystemLoader("templates"))
+          for path in sorted(Path("templates").glob("*.html")):
+              env.get_template(path.name)
+              print(f"ok  {path.name}")
+          PY
+
+      - name: Check every JavaScript file parses
+        run: |
+          for f in static/js/*.js static/sw.js; do
+            node --check "$f" && echo "ok  $f"
+          done
+
+      - name: Check the German and English dictionaries are at parity
+        # A key in one dictionary but not the other is a bug, not a fallback —
+        # and it only shows up as an untranslated string on one language's UI.
+        run: |
+          node - <<'JS'
+          const fs = require('fs');
+          const src = fs.readFileSync('static/js/i18n.js', 'utf8');
+          const grab = (name) => {
+            const start = src.indexOf('var ' + name + ' = {');
+            const end = src.indexOf('\n  };', start);
+            if (start < 0 || end < 0) throw new Error('cannot find dictionary ' + name);
+            return new Set([...src.slice(start, end).matchAll(/^\s*'([^']+)':/gm)].map(m => m[1]));
+          };
+          const de = grab('de'), en = grab('en');
+          const missing = [
+            ...[...de].filter(k => !en.has(k)).map(k => 'en missing ' + k),
+            ...[...en].filter(k => !de.has(k)).map(k => 'de missing ' + k)
+          ];
+          if (missing.length) { console.error(missing.join('\n')); process.exit(1); }
+          console.log(`ok  ${de.size} keys, de/en at parity`);
+          JS
+
+      - name: Check no secret-shaped value is committed
+        # This repository is public, so a pasted token must never survive review.
+        # Obvious placeholders are excluded by name rather than by length: the CI
+        # steps above legitimately set these variables, and a check that always
+        # fails is a check everybody learns to ignore.
+        run: |
+          hits=$(grep -rniE '(MUSIC_SERVICE_TOKEN|MUSIC_STREAM_SECRET|DB_PASS)[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9_-]{16,}' \
+                   --include='*.py' --include='*.yml' --include='*.yaml' --include='*.js' . \
+                 | grep -viE 'not-a-real|ci-only|replace-me|example|placeholder|generated-value' || true)
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "A secret-shaped value is committed. This repository is public."
+            exit 1
+          fi
+          echo "ok  no secret-shaped values"
+
+  build:
+    needs: check
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # GITHUB_TOKEN, not CR_PAT. CR_PAT is a repository secret on
+      # zer0space-dashboard ONLY (its GHCR package predates its repo and is not
+      # linked to it); in any other repository it resolves to an empty string
+      # and docker/login-action fails with "Username and password required".
+      # A fresh package like this one is created linked to its repo, so the
+      # built-in token has write access.
+      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3
+
+      - uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09 # v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/zer0space-net/zer0space-music:latest
+            ghcr.io/zer0space-net/zer0space-music:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

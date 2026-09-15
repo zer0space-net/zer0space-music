@@ -1,0 +1,114 @@
+# zer0space Music — Swarm stack.
+#
+# Deployed through Portainer, like every other stack on this cluster. The image
+# is pulled from GHCR; there is no git clone on the nodes, so `docker build`
+# here would do nothing. Env changes go in the Portainer stack UI.
+#
+# THIS FILE IS PUBLIC. It contains no secrets and no defaults that act as one:
+# every credential arrives as a Swarm secret (see `secrets:` at the bottom).
+#
+# Deploy notes and the first-run checklist are in docs/deploy.md.
+
+version: "3.8"
+
+services:
+  music:
+    image: ghcr.io/zer0space-net/zer0space-music:latest
+
+    # NO PORTS. This is load-bearing, not an omission.
+    #
+    # The service has no login of its own: it trusts the X-Zer0space-User header
+    # that the dashboard sends. That is only sound while the dashboard is the
+    # only thing that can reach it — hence no published port, and a shared
+    # token checked on every request as the second lock. Publishing a port here
+    # would expose an unauthenticated music service to the LAN.
+    # ports: []
+
+    environment:
+      # --- Database (own database on the shared PostgreSQL host) ---
+      DB_HOST: "192.168.0.16"
+      DB_PORT: "5432"
+      DB_NAME: "zer0space_music"
+      DB_USER: "dashboard"
+      # DB_PASS comes from the db_password secret below, never from here.
+
+      # --- Mount ---
+      # Must match the dashboard's MUSIC_PATH. The gateway also sends
+      # X-Forwarded-Prefix per request, which wins over this.
+      MUSIC_BASE_PATH: "/music"
+
+      # Audio goes through the tunnel with the API (the chosen default).
+      # Set this to a direct/Tailscale origin to move media off the tunnel.
+      # MUSIC_MEDIA_BASE_URL: ""
+
+      # --- Scraper ---
+      MUSIC_SCRAPER_ENABLED: "true"
+      MUSIC_SCRAPER_WORKERS: "2"
+      MUSIC_SCRAPER_TIMEOUT: "45"
+      MUSIC_PREVIEW_FALLBACK: "true"
+
+      # Optional, only if YouTube starts rate-limiting this host's IP:
+      # MUSIC_SCRAPER_PROXY: "http://proxy:3128"
+      # MUSIC_COOKIES_FILE: "/run/secrets/music_cookies"
+
+    secrets:
+      - db_password
+      - music_service_token
+      - music_stream_secret
+      # - music_cookies
+
+    networks:
+      # The dashboard's network, so the gateway can reach us as http://music:8000
+      # without either service being exposed. This is an EXTERNAL network created
+      # by the dashboard stack — see the bottom of this file.
+      - dashboard_net
+
+    deploy:
+      # Two replicas are safe: this service holds no in-process state. Identity
+      # arrives in a header per request and everything per-user is in Postgres,
+      # unlike the dashboard, which is pinned to one replica by its session store.
+      replicas: 2
+      restart_policy:
+        condition: any
+        delay: 10s
+      update_config:
+        order: start-first
+        failure_action: rollback
+      resources:
+        limits:
+          # yt-dlp's peak is modest (it parses JSON, it does not transcode), but
+          # two workers plus streaming buffers want headroom.
+          memory: 768M
+        reservations:
+          memory: 192M
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+secrets:
+  # Shared with the dashboard — the same PostgreSQL role.
+  db_password:
+    external: true
+  # Must be byte-identical to the dashboard's music_service_token.
+  #   printf %s "$(python -c 'import secrets;print(secrets.token_urlsafe(32))')" \
+  #     | docker secret create music_service_token -
+  music_service_token:
+    external: true
+  # Signs stream tickets. External so tickets survive a redeploy.
+  music_stream_secret:
+    external: true
+  # Optional YouTube cookies.txt. Uncomment here and in the service above.
+  # music_cookies:
+  #   external: true
+
+networks:
+  dashboard_net:
+    external: true
+    # The Swarm-prefixed name of the network the dashboard stack creates. It is
+    # `dashboard_dashboard_net`, NOT `dashboard_net` — the stack name is
+    # prepended. Getting this wrong makes the gateway fail with a DNS error that
+    # reads like the music service is down.
+    name: dashboard_dashboard_net

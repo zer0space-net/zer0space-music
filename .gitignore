@@ -1,0 +1,19 @@
+# Secrets — this repository is public.
+.env
+*.env
+!.env.example
+cookies.txt
+*cookies*.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Local
+.pytest_cache/
+.DS_Store
+Thumbs.db
+*.log

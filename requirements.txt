@@ -1,0 +1,22 @@
+# Runtime dependencies, pinned exactly so a rebuild of the same commit produces
+# the same image. Same rule as the dashboard: every entry must ship a musllinux
+# wheel or be pure Python, which is what lets the Dockerfile stay on Alpine with
+# no compiler. If a bump ever breaks that, switch the base image to
+# python:3.12-slim rather than adding gcc/musl-dev to the runtime image.
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+asyncpg==0.30.0
+httpx==0.28.1
+itsdangerous==2.2.0
+jinja2==3.1.5
+
+# The scraper. yt-dlp is pure Python and is the only dependency here that is
+# expected to be bumped often: it tracks a moving target, and a stale pin does
+# not degrade — it stops resolving entirely. An older pin was tried during
+# development and every extraction failed with "The page needs to be reloaded";
+# this version was verified end to end against real tracks.
+#
+# The weekly job in .github/workflows/bump-ytdlp.yml opens a PR when a newer
+# release exists. If playback breaks across the board, bump this FIRST.
+yt-dlp==2026.8.19

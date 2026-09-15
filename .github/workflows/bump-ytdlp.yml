@@ -1,0 +1,68 @@
+name: Check for a newer yt-dlp
+
+# yt-dlp is the one dependency that does not degrade gracefully. YouTube changes
+# its player, an old extractor stops working, and EVERY track fails to resolve
+# at once — the symptom is "nothing plays any more", with nothing in this repo's
+# diff to explain it. This job makes that visible before a listener finds it.
+#
+# It opens an issue rather than a PR: the bump is one line, and a human should
+# glance at yt-dlp's changelog before shipping a scraper update.
+
+on:
+  schedule:
+    # Mondays, 06:00 UTC.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Compare the pin against the latest release
+        id: compare
+        run: |
+          pinned=$(sed -n 's/^yt-dlp==\(.*\)$/\1/p' requirements.txt)
+          latest=$(curl -fsSL https://pypi.org/pypi/yt-dlp/json | python -c "import json,sys; print(json.load(sys.stdin)['info']['version'])")
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          if [ "$pinned" = "$latest" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+            echo "yt-dlp is current at $pinned"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "yt-dlp pinned at $pinned, latest is $latest"
+          fi
+
+      - name: Open or update an issue
+        if: steps.compare.outputs.current == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PINNED: ${{ steps.compare.outputs.pinned }}
+          LATEST: ${{ steps.compare.outputs.latest }}
+        run: |
+          title="yt-dlp $LATEST is available (pinned: $PINNED)"
+          existing=$(gh issue list --label ytdlp --state open --json number --jq '.[0].number')
+          body=$(printf '%s\n' \
+            "\`requirements.txt\` pins **yt-dlp==$PINNED**; the latest release is **$LATEST**." \
+            "" \
+            "A stale pin does not degrade — it stops resolving audio entirely." \
+            "If playback has broken across the board, this is the first thing to change." \
+            "" \
+            "    sed -i 's/^yt-dlp==.*/yt-dlp==$LATEST/' requirements.txt" \
+            "" \
+            "Then let CI rebuild the image and force-pull it on the cluster:" \
+            "" \
+            "    docker service update --force --image ghcr.io/zer0space-net/zer0space-music:latest music_music" \
+            "" \
+            "Changelog: https://github.com/yt-dlp/yt-dlp/releases/tag/$LATEST")
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --title "$title" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body" --label ytdlp
+          fi
