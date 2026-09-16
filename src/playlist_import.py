@@ -34,10 +34,21 @@ from .providers import deezer, spotify
 # track costs at least one Deezer round trip — inside a reasonable reply time.
 MAX_TRACKLIST_ENTRIES = 500
 
-# Eight is comfortably inside "one request at a time is polite" for a public,
-# unauthenticated API while still turning a 100-track playlist around in a
-# handful of seconds rather than one search at a time.
-MATCH_CONCURRENCY = 8
+# Deezer's public API rate-limits by IP (roughly 50 requests/5s) and gives no
+# advance warning — a burst just starts failing. A 145-track CSV import at the
+# old concurrency of 8, each track worth up to two searches (see _best_match's
+# fallback pass), blows through that within the first couple of seconds; every
+# search after that fails, and a failure was silently read as "not found" —
+# which is how the likes of Nirvana and Miley Cyrus ended up unmatched on a
+# real import, not a scoring problem at all. Four is gentler, and _search's
+# retry below is what actually recovers from the throttling that still
+# happens even at four.
+MATCH_CONCURRENCY = 4
+# How many times a single search retries after a Deezer failure (rate limit,
+# a dropped connection) before it is treated as a genuine miss. Backed off
+# rather than hammered again immediately — see _search.
+SEARCH_RETRIES = 3
+SEARCH_RETRY_BACKOFF = 1.5
 # Wider than ytmusic.py's 8s: that one matches a catalogue duration against a
 # YouTube upload of the *same* master; this matches an external title against
 # Deezer, which not infrequently indexes a different edit of the same song
@@ -104,12 +115,22 @@ def _score(candidate: dict[str, Any], title: str, artist: str, duration: int) ->
 
 
 async def _search(query: str) -> list[dict[str, Any]]:
+    """A DeezerUnavailable here almost always means "rate-limited", not "no
+    such song" — Deezer's public API gives no advance warning before it
+    starts refusing requests. Retrying with backoff is what tells the two
+    apart: an empty *successful* response is a real miss and returns
+    immediately; a failed request gets a few more tries, spaced out, before
+    this gives up and reports the track unmatched."""
     if not query.strip():
         return []
-    try:
-        return await deezer.search_tracks(query, limit=CANDIDATE_LIMIT)
-    except deezer.DeezerUnavailable:
-        return []
+    for attempt in range(SEARCH_RETRIES):
+        try:
+            return await deezer.search_tracks(query, limit=CANDIDATE_LIMIT)
+        except deezer.DeezerUnavailable:
+            if attempt == SEARCH_RETRIES - 1:
+                return []
+            await asyncio.sleep(SEARCH_RETRY_BACKOFF * (attempt + 1))
+    return []
 
 
 async def _best_match(title: str, artist: str, duration: int) -> dict[str, Any] | None:

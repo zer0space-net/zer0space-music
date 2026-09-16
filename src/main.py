@@ -634,6 +634,14 @@ def _parse_csv_tracks(text: str) -> list[dict[str, Any]]:
         if not title:
             continue
         artist = (row[artist_idx] if artist_idx is not None and artist_idx < len(row) else "").strip()
+        # Exportify's Artist Name(s) joins collaborators with ";" (a comma
+        # would collide with the CSV delimiter) — "Kendrick Lamar;SZA". The
+        # primary artist alone is the better search signal: Deezer's search
+        # tolerates the raw semicolon fine, but playlist_import._score's
+        # artist-overlap ratio is measured against whatever we hand it, and
+        # a three-name wanted set scores worse against Deezer's one-artist
+        # field than the first name alone would.
+        artist = artist.split(";", 1)[0].strip()
         entry: dict[str, Any] = {"title": title[:300], "artist": artist[:300]}
         raw_duration_ms = (row[duration_idx] if duration_idx is not None and duration_idx < len(row) else "").strip()
         if raw_duration_ms.isdigit():
