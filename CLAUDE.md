@@ -41,7 +41,7 @@ parses the template, `node --check`s every script, checks de/en dictionary
 parity, and greps for committed secrets. That is the whole safety net — if you
 add non-trivial logic, say so rather than assuming it is covered.
 
-## Six things that are easy to break
+## Seven things that are easy to break
 
 ### 1. The one `<audio>` element
 
@@ -104,6 +104,20 @@ import starts failing at once, re-check the JSON path
 (`props.pageProps.state.data.entity.trackList`) against a fresh fetch before
 suspecting anything else. Full account, including the 100-track cap that page
 itself imposes: `docs/providers.md`, "Spotify — playlist import".
+
+### 7. A deploy is not live until `__version__` moves
+
+`templates/app.html` appends `?v={{ version }}` (from `src/__init__.py`) to
+every static JS/CSS URL, and `static/sw.js` caches `/static/` responses by
+full request URL — so that query string is the only thing that makes a
+deploy reach a tab that already has the app open. Forgetting to bump
+`__version__` when JS or CSS changes means the new code sits on the server
+correctly, but the service worker keeps serving the previous version's
+cached response indefinitely (its own stale-while-revalidate refresh runs
+against the *same* unversioned-if-you-forgot URL, so there is nothing to
+invalidate the entry with). Bump it in the same commit as the change, not
+after — "it looks deployed but the browser is still running yesterday's
+code" is a hard bug to recognise from the symptoms alone.
 
 ## Database
 

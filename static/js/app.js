@@ -743,7 +743,12 @@
   async function promptImportBackup() {
     var result = await openModal(t('playlist.importBackup'),
       '<p class="modal-hint">' + esc(t('playlist.importBackupHint')) + '</p>' +
-      '<input type="file" id="pl-backup-file" name="file" accept=".csv,text/csv,.json,application/json" required>',
+      // Extensions only, no MIME types: a MIME entry here filters by the
+      // OS's own file-type association, which for a .csv on Windows is
+      // inconsistent enough (varies by what's installed) that real files
+      // were disappearing from the picker entirely rather than just
+      // failing to import. Extension matching does not have that problem.
+      '<input type="file" id="pl-backup-file" name="file" accept=".csv,.json" required>',
       t('common.create'));
     if (!result || !result.file) return;
 

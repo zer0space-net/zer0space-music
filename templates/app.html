@@ -30,13 +30,19 @@
 <link rel="apple-touch-icon" href="{{ base }}/static/img/icon-192.png">
 <link rel="icon" href="{{ base }}/static/img/icon.svg" type="image/svg+xml">
 
-<link rel="stylesheet" href="{{ base }}/static/css/music.css">
-<script defer src="{{ base }}/static/js/boot.js"></script>
-<script defer src="{{ base }}/static/js/starfield.js"></script>
-<script defer src="{{ base }}/static/js/i18n.js"></script>
-<script defer src="{{ base }}/static/js/api.js"></script>
-<script defer src="{{ base }}/static/js/player.js"></script>
-<script defer src="{{ base }}/static/js/app.js"></script>
+{# ?v={{ version }} is what makes a deploy actually reach an open tab. The
+   service worker below caches /static/ responses by full request URL
+   (query string included), so bumping __version__ in src/__init__.py — do
+   it whenever JS or CSS changes — mints a URL the worker has never cached
+   and forces a real network fetch instead of the stale-while-revalidate
+   path serving yesterday's code for one more load. #}
+<link rel="stylesheet" href="{{ base }}/static/css/music.css?v={{ version }}">
+<script defer src="{{ base }}/static/js/boot.js?v={{ version }}"></script>
+<script defer src="{{ base }}/static/js/starfield.js?v={{ version }}"></script>
+<script defer src="{{ base }}/static/js/i18n.js?v={{ version }}"></script>
+<script defer src="{{ base }}/static/js/api.js?v={{ version }}"></script>
+<script defer src="{{ base }}/static/js/player.js?v={{ version }}"></script>
+<script defer src="{{ base }}/static/js/app.js?v={{ version }}"></script>
 </head>
 
 <body data-user="{{ user_id }}" data-username="{{ username }}">
