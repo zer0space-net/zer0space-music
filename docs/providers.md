@@ -220,16 +220,34 @@ Song title,Artist name
 Another song,Another artist
 ```
 
-The header row is optional (recognised and skipped: `title`/`song`/`track`/
-`titel`, case-insensitive) and so is the artist column — an artist-less
-title still gets a title-only search, just with a smaller signal (see
-`_best_match`'s two-pass search above). `_parse_csv_tracks` in `main.py`
-parses it with the stdlib `csv` module rather than a hand-rolled split, so a
-title that itself contains a comma survives if it is quoted
-(`"Song, Part 2",Artist`). The playlist name comes from the uploaded
-file's own name (extension stripped, `_`/`-` read as spaces), since a CSV
-has nowhere else to carry one. Capped at `MAX_TRACKLIST_ENTRIES` (500) per
-file — one Deezer round trip per track, bounded by `MATCH_CONCURRENCY`.
+The header row is optional and recognised by column *name*, not position —
+`_find_csv_columns` in `main.py` matches a whole known shape (title, artist
+and, where the tool provides one, duration) rather than assuming column 0
+is always the title. Two shapes are recognised today:
+
+| Tool | Header | Title | Artist | Duration |
+|---|---|---|---|---|
+| [Exportify](https://exportify.net) | `Track URI,Track Name,Album Name,Artist Name(s),Release Date,Duration (ms),…` | `Track Name` | `Artist Name(s)` | `Duration (ms)` |
+| Plain | `title,artist` (or `song`/`track`/`titel`, `artists`/`künstler`/`interpret`) | col 0 | col 1 | — |
+
+Getting this wrong is not a small miss: Exportify's real first column is
+`Track URI`, a `spotify:track:…` id. A naive "column 0 is the title" read —
+this code's first version — sends that URI to Deezer as a search query for
+every single row and matches nothing, ever, which reads exactly like the
+matcher is broken rather than like the file was never in the assumed shape.
+If a fetched Exportify export ever renames or reorders these columns,
+`_find_csv_columns` is the one place to update.
+
+No header row at all falls back to the simplest shape, column 0 the title
+and column 1 (if present) the artist — no duration guess there, since a
+bare number with no header to say seconds or milliseconds is a coin flip
+not worth taking. `_parse_csv_tracks` parses everything with the stdlib
+`csv` module rather than a hand-rolled split, so a title that itself
+contains a comma survives if it is quoted (`"Song, Part 2",Artist`). The
+playlist name comes from the uploaded file's own name (extension stripped,
+`_`/`-` read as spaces), since a CSV has nowhere else to carry one. Capped
+at `MAX_TRACKLIST_ENTRIES` (500) per file — one Deezer round trip per
+track, bounded by `MATCH_CONCURRENCY`.
 
 ---
 
