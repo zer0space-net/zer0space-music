@@ -79,10 +79,12 @@ src/
 ├── library.py         Likes, playlists, history, player state, preferences
 ├── resolve.py         Track -> playable source: cache, dedupe, fallback
 ├── stream.py          Signed tickets + the Range-aware audio relay
+├── playlist_import.py Spotify playlist -> matched against our own catalogue
 ├── providers/
 │   ├── base.py        Track/Album/Artist shapes; the SourceProvider contract
 │   ├── deezer.py      The catalogue (public API, no key)
-│   └── ytmusic.py     The scraper (yt-dlp), matching and format choice
+│   ├── ytmusic.py     The scraper (yt-dlp), matching and format choice
+│   └── spotify.py     Reads a public playlist link, no API key (see docs/providers.md)
 └── main.py            FastAPI app: routes, lifespan, error handling
 static/
 ├── css/music.css      Spotify's grid on the dashboard's design tokens

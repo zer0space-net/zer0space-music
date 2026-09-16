@@ -564,6 +564,34 @@
     }
   }
 
+  async function promptImportSpotify() {
+    var result = await openModal(t('playlist.importSpotify'),
+      '<label for="pl-spotify-url">' + esc(t('playlist.importUrl')) + '</label>' +
+      '<input type="text" id="pl-spotify-url" name="url" required placeholder="' +
+      esc(t('playlist.importUrlPh')) + '">',
+      t('common.create'));
+    if (!result || !result.url.trim()) return;
+
+    // The modal is already closed at this point (submit resolves and closes
+    // it, same as promptNewPlaylist) — matching against our own catalogue can
+    // take a few seconds for a full playlist, so this toast is the only
+    // feedback the user gets until the result lands.
+    toast(t('playlist.importing'));
+
+    try {
+      var imported = await API.importSpotifyPlaylist(result.url.trim());
+      var message = t('playlist.importDone', {
+        name: imported.playlist.name, matched: imported.matched, total: imported.total
+      });
+      if (imported.truncated) message += t('playlist.importTruncated', { max: imported.total });
+      toast(message);
+      await refreshPlaylists();
+      window.location.hash = '#/playlist/' + encodeURIComponent(imported.playlist.id);
+    } catch (err) {
+      toast(I18N.tError(err.data || err), true);
+    }
+  }
+
   async function promptAddToPlaylist(track) {
     var options = store.playlists.map(function (p) {
       return '<button type="button" class="lib-item" data-pick="' + esc(p.id) + '">' +
@@ -908,6 +936,9 @@
 
   document.getElementById('new-playlist').addEventListener('click', function () {
     promptNewPlaylist();
+  });
+  document.getElementById('import-playlist').addEventListener('click', function () {
+    promptImportSpotify();
   });
 
   // --- Player wiring -------------------------------------------------------

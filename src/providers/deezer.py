@@ -167,6 +167,19 @@ async def search(query: str, limit: int = 40) -> dict[str, list[dict[str, Any]]]
     return results
 
 
+async def search_tracks(query: str, limit: int = 8) -> list[dict[str, Any]]:
+    """Track-only search, one request.
+
+    ``search()`` above fires four lanes in parallel because the full-text
+    search view wants artist and album rows too; matching a single track
+    against the catalogue (see ``playlist_import.py``) only ever needs this
+    one, and doing all four for every track in a 100-song playlist import
+    would be four times the requests for three lanes nobody reads.
+    """
+    payload = await _get("/search/track", q=query, limit=max(1, min(limit, 40)))
+    return _tracks(payload)
+
+
 def _playlist_stub(raw: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(raw.get("id") or ""),

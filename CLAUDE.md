@@ -41,7 +41,7 @@ parses the template, `node --check`s every script, checks de/en dictionary
 parity, and greps for committed secrets. That is the whole safety net — if you
 add non-trivial logic, say so rather than assuming it is covered.
 
-## Five things that are easy to break
+## Six things that are easy to break
 
 ### 1. The one `<audio>` element
 
@@ -93,6 +93,17 @@ The app is mounted at `/music` by a reverse proxy. Server-side, read it from
 from `window.ZS_BASE`. A root-relative `/api/...` resolves against the dashboard
 instead. This is the same class of bug as the Crimson root-relative playlist
 failure, and the PWA manifest's `start_url`/`scope` need it too.
+
+### 6. Spotify import has no key to rotate — because it has no key at all
+
+`src/providers/spotify.py` reads `open.spotify.com/embed/playlist/<id>`, the
+public embed page, instead of the real Spotify Web API — no registered app, no
+client id/secret. That also means it depends on the shape of a page Spotify
+never promised to keep stable, same trade as yt-dlp against YouTube. If every
+import starts failing at once, re-check the JSON path
+(`props.pageProps.state.data.entity.trackList`) against a fresh fetch before
+suspecting anything else. Full account, including the 100-track cap that page
+itself imposes: `docs/providers.md`, "Spotify — playlist import".
 
 ## Database
 

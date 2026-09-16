@@ -126,6 +126,70 @@ have been taken down, which is a different failure from a stale URL.
 
 ---
 
+## Spotify — playlist import, not a catalogue source
+
+[`src/providers/spotify.py`](../src/providers/spotify.py) +
+[`src/playlist_import.py`](../src/playlist_import.py). Reads a public Spotify
+playlist and creates the matching playlist here, resolved entirely against
+Deezer — Spotify is never used to browse or play anything.
+
+**No registered app, no client id/secret.** Spotify's real Web API needs one;
+this instead reads the same JSON a browser gets rendering
+`https://open.spotify.com/embed/playlist/<id>` — the page Spotify serves
+specifically for embedding a playlist in someone else's site, unauthenticated.
+That is also the whole risk: this depends on a page Spotify never promised to
+keep stable, exactly the trade already made with yt-dlp against YouTube (see
+below). If import starts failing for every playlist at once, the JSON path in
+`spotify.fetch_playlist` — `props.pageProps.state.data.entity` — is the first
+thing to re-check against a fresh fetch of that URL.
+
+### The pipeline
+
+```
+paste a link ─► extract the 22-char playlist id ─► GET the embed page
+                                                          │
+     one playlist here ◄── add matched tracks ◄── score N candidates each
+                                                          │
+                                              search Deezer, per Spotify track
+                                              (bounded concurrency, MATCH_CONCURRENCY=8)
+```
+
+### Scoring
+
+Same additive shape as `ytmusic._score`, but title and artist both carry full
+weight rather than one being a fallback for the other — Deezer's `title` and
+`artist.name` are structured fields, not a noisy upload title, so there is no
+YouTube-style "strip `(Official Video)`" step needed.
+
+| Signal | Weight |
+|---|---|
+| Duration within 2 s | +6 |
+| Duration within 6 s | +4 sliding |
+| Duration off by >20 s | −4 |
+| Title token overlap | up to +3 |
+| Artist name overlap | up to +3 |
+
+A candidate scoring ≤ 0 is reported as unmatched rather than added — see the
+module docstring in `playlist_import.py`.
+
+### The 100-track cap is Spotify's, not ours
+
+The embed page's `trackList` does not paginate and exposes no total distinct
+from its own length. Tested against a 50-track and a 100-track playlist while
+building this: the first came back complete, the second came back at exactly
+100 with no signal of how much longer the real playlist is. `MAX_TRACKS = 100`
+in `spotify.py` and `SpotifyPlaylist.truncated` just names that ceiling rather
+than pretending it is not there — a playlist import can only ever see what
+this page shows it.
+
+### No secret to rotate, nothing to configure
+
+Unlike the scraper, there is no `MUSIC_SPOTIFY_*` setting and nothing in
+`docker-compose.yml` — the feature works or it does not, per-request, with
+nothing an operator needs to set up first.
+
+---
+
 ## When playback breaks
 
 ### Everything stops playing at once

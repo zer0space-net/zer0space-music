@@ -22,7 +22,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import cache, config, db, identity, library, resolve, stream
+from . import cache, config, db, identity, library, playlist_import, resolve, stream
 from .providers import deezer
 
 app = FastAPI(
@@ -104,7 +104,9 @@ async def _shutdown() -> None:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
-    await asyncio.gather(deezer.close(), stream.close(), db.close(), return_exceptions=True)
+    await asyncio.gather(
+        deezer.close(), stream.close(), playlist_import.close(), db.close(), return_exceptions=True
+    )
 
 
 async def _sweeper() -> None:
@@ -460,6 +462,16 @@ async def api_create_playlist(request: Request) -> dict[str, Any]:
     return await library.create_playlist(
         user, str(payload.get("name") or ""), str(payload.get("description") or "")
     )
+
+
+@app.post("/api/playlists/import-spotify", include_in_schema=False)
+async def api_import_spotify_playlist(request: Request) -> dict[str, Any]:
+    """Reads a public Spotify playlist link and creates the matching playlist
+    here from whatever our own catalogue has — see playlist_import.py. No
+    Spotify account or API key involved on either end."""
+    user = me(request)
+    payload = await json_body(request)
+    return await playlist_import.import_spotify_playlist(user, str(payload.get("url") or ""))
 
 
 @app.get("/api/playlists/{playlist_id}", include_in_schema=False)
