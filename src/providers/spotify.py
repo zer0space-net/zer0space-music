@@ -120,7 +120,11 @@ async def fetch_playlist(playlist_id: str) -> SpotifyPlaylist:
 
     match = _NEXT_DATA_RE.search(response.text)
     if not match:
-        # The page structure changed — see the module docstring.
+        # The page structure changed — see the module docstring. Also what a
+        # region-gated consent/interstitial page would hit, since that page
+        # has no __NEXT_DATA__ block at all; the byte count is the fastest
+        # way to tell the two apart in a log without dumping the whole body.
+        print(f"[music] spotify import: no __NEXT_DATA__ in a {len(response.text)}-byte response")
         raise SpotifyUnavailable("Could not read the playlist page (page format changed)")
     try:
         payload = json.loads(match.group(1))
@@ -133,6 +137,17 @@ async def fetch_playlist(playlist_id: str) -> SpotifyPlaylist:
 
     raw_tracks = entity.get("trackList") or []
     tracks = [t for t in (_parse_track(r) for r in raw_tracks) if t is not None]
+    dropped = len(raw_tracks) - len(tracks)
+    # This page's shape (and therefore how much of a playlist it embeds) has
+    # already turned out to differ by the requesting network/region for at
+    # least one real playlist — log the raw count so that is visible from the
+    # server's own vantage point rather than only reproducible by whoever
+    # tests it from wherever they happen to be sitting.
+    print(
+        f"[music] spotify import: playlist {playlist_id!r} -> "
+        f"{len(raw_tracks)} raw entries, {len(tracks)} usable"
+        + (f", {dropped} dropped (not entityType=track or no title)" if dropped else "")
+    )
     return SpotifyPlaylist(
         name=str(entity.get("title") or "Imported playlist")[:120],
         owner=str(entity.get("subtitle") or ""),
