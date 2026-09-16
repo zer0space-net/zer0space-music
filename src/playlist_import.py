@@ -31,10 +31,18 @@ from .providers import deezer, spotify
 # unauthenticated API while still turning a 100-track playlist around in a
 # handful of seconds rather than one search at a time.
 MATCH_CONCURRENCY = 8
-DURATION_TOLERANCE = 6
+# Wider than ytmusic.py's 8s: that one matches a catalogue duration against a
+# YouTube upload of the *same* master; this matches Spotify against Deezer,
+# two different services that not infrequently index a different edit of the
+# same song (radio edit vs. album version, a few seconds of a fade trimmed
+# differently) as "the" track. Too tight here turns a right match into a
+# false negative — see _best_match's fallback pass for the other half of that
+# fix.
+DURATION_TOLERANCE = 10
+CANDIDATE_LIMIT = 12
 # How many unmatched titles to hand back to the client. The playlist import
 # response is not the place for a 100-line report; enough to spot-check.
-MAX_UNMATCHED_REPORTED = 25
+MAX_UNMATCHED_REPORTED = 100
 
 
 async def close() -> None:
@@ -65,10 +73,13 @@ def _score(candidate: dict[str, Any], title: str, artist: str, duration: int) ->
             score += 6.0
         elif delta <= DURATION_TOLERANCE:
             score += 4.0 - (delta / DURATION_TOLERANCE)
-        elif delta <= 20:
+        elif delta <= 30:
             score += 0.5
         else:
-            score -= 4.0
+            # Still a penalty, not a hard reject — a very good title+artist
+            # match against a genuinely different edit is better kept than
+            # dropped; _best_match's own threshold is what filters the rest.
+            score -= 2.5
 
     wanted_title = _normalise(title)
     got_title = _normalise(str(candidate.get("title") or ""))
@@ -83,14 +94,28 @@ def _score(candidate: dict[str, Any], title: str, artist: str, duration: int) ->
     return score
 
 
-async def _best_match(track: spotify.SpotifyTrack) -> dict[str, Any] | None:
-    query = f"{track.artist} {track.title}".strip()
-    if not query:
-        return None
+async def _search(query: str) -> list[dict[str, Any]]:
+    if not query.strip():
+        return []
     try:
-        candidates = await deezer.search_tracks(query, limit=8)
+        return await deezer.search_tracks(query, limit=CANDIDATE_LIMIT)
     except deezer.DeezerUnavailable:
-        return None
+        return []
+
+
+async def _best_match(track: spotify.SpotifyTrack) -> dict[str, Any] | None:
+    """Two passes, not one — "artist title" is the better query when Deezer
+    has the track under the artist name Spotify gave, but a mismatched artist
+    string (a different feat. order, "&" vs "and", a collab credited
+    differently between the two services) can make that query miss something
+    a plain title search would still find. Both candidate pools feed the same
+    scorer, so a bad title-only match still needs the artist signal to win.
+    """
+    candidates = await _search(f"{track.artist} {track.title}".strip())
+    if not candidates:
+        candidates = await _search(track.title)
+    elif max(_score(c, track.title, track.artist, track.duration) for c in candidates) <= 0:
+        candidates = candidates + await _search(track.title)
     if not candidates:
         return None
     best = max(candidates, key=lambda c: _score(c, track.title, track.artist, track.duration))

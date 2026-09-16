@@ -420,7 +420,13 @@
       actions += '<button type="button" class="btn-play-big" id="play-all" ' +
         'aria-label="' + esc(t('player.play')) + '">' +
         '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">' +
-        '<path d="M8 5.2 19 12 8 18.8z"/></svg></button>';
+        '<path d="M8 5.2 19 12 8 18.8z"/></svg></button>' +
+        '<button type="button" class="btn-icon" id="shuffle-all" ' +
+        'aria-label="' + esc(t('playlist.shufflePlay')) + '" title="' + esc(t('playlist.shufflePlay')) + '">' +
+        '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<path d="M4 6h3.6l7 12H18M4 18h3.6l2.4-4.1M15 6h3M15 18h3"/>' +
+        '<path d="m16 4 2 2-2 2M16 16l2 2-2 2"/></svg></button>';
     }
     if (options.ownId) {
       actions += '<button type="button" class="btn btn-ghost btn-sm" data-rename="' +
@@ -597,6 +603,20 @@
       toast(message);
       await refreshPlaylists();
       window.location.hash = '#/playlist/' + encodeURIComponent(imported.playlist.id);
+      // A toast auto-dismisses in a few seconds — no place to read a list of
+      // up to 100 titles. The modal is read-only (no input fields, so
+      // submitting it collects nothing) and only shown when there is
+      // something to show.
+      if (imported.unmatched && imported.unmatched.length) {
+        openModal(
+          t('playlist.importUnmatchedTitle', { n: imported.unmatched.length }),
+          '<p>' + esc(t('playlist.importUnmatchedIntro')) + '</p>' +
+          '<ul class="unmatched-list">' + imported.unmatched.map(function (u) {
+            return '<li>' + esc(u.artist ? u.artist + ' – ' + u.title : u.title) + '</li>';
+          }).join('') + '</ul>',
+          t('common.close')
+        );
+      }
     } catch (err) {
       toast(I18N.tError(err.data || err), true);
     }
@@ -783,6 +803,24 @@
     if (playAll) {
       var tracks = visibleTracks();
       if (tracks.length) Player.playQueue(tracks, 0, location.hash);
+      return;
+    }
+
+    var shuffleAll = event.target.closest('#shuffle-all');
+    if (shuffleAll) {
+      var shuffleTracks = visibleTracks();
+      if (shuffleTracks.length) {
+        // Matches the player bar's own shuffle toggle rather than a
+        // one-off "play shuffled once" — pressing it here turns shuffle on
+        // for the session, same as Spotify's playlist shuffle button.
+        Player.applyPrefs({ shuffle: true });
+        API.savePrefs({ shuffle: true }).catch(function () {});
+        // playQueue's startIndex track is always moved to the front of the
+        // shuffled order (see buildOrder in player.js) — starting at 0 every
+        // time would make "shuffle play" always open with the same song.
+        var startAt = Math.floor(Math.random() * shuffleTracks.length);
+        Player.playQueue(shuffleTracks, startAt, location.hash);
+      }
       return;
     }
 
