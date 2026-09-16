@@ -742,10 +742,12 @@
 
   async function promptImportBackup() {
     var result = await openModal(t('playlist.importBackup'),
-      '<input type="file" id="pl-backup-file" name="file" accept="application/json,.json" required>',
+      '<p class="modal-hint">' + esc(t('playlist.importBackupHint')) + '</p>' +
+      '<input type="file" id="pl-backup-file" name="file" accept=".csv,text/csv,.json,application/json" required>',
       t('common.create'));
     if (!result || !result.file) return;
 
+    var isCsv = /\.csv$/i.test(result.file.name);
     var text;
     try {
       text = await result.file.text();
@@ -754,22 +756,31 @@
       return;
     }
 
-    var payload;
     try {
-      payload = JSON.parse(text);
-    } catch (err) {
-      toast(I18N.tError({ code: 'BAD_BACKUP' }), true);
-      return;
-    }
-
-    try {
-      var restored = await API.importBackup(payload);
-      // Two response shapes: a real backup (library.import_backup) restores
-      // one or more playlists verbatim and says so with a count. A title/
-      // artist list (no catalogue key at all — see playlist_import.py) goes
-      // through the same Deezer matching pass as the Spotify import, so it
-      // answers the same shape that does: one playlist, a matched/total
-      // count, and an unmatched list worth showing.
+      var restored;
+      if (isCsv) {
+        // The filename becomes the playlist name (minus extension,
+        // underscores/dashes read as spaces) — a CSV has nowhere else to
+        // carry one. Matching runs server-side; see main.py's
+        // POST /api/playlists/import-csv.
+        var name = result.file.name.replace(/\.csv$/i, '').replace(/[_-]+/g, ' ').trim();
+        restored = await API.importCsv(text, name || 'Imported playlist');
+      } else {
+        var payload;
+        try {
+          payload = JSON.parse(text);
+        } catch (err) {
+          toast(I18N.tError({ code: 'BAD_BACKUP' }), true);
+          return;
+        }
+        restored = await API.importBackup(payload);
+      }
+      // Two response shapes: a real JSON backup (library.import_backup)
+      // restores one or more playlists verbatim and says so with a count. A
+      // CSV title/artist list (no catalogue key at all — see
+      // playlist_import.py) goes through the same Deezer matching pass as
+      // the Spotify import, so it answers the same shape that does: one
+      // playlist, a matched/total count, and an unmatched list worth showing.
       if (restored.playlists) {
         toast(t('playlist.backupImported', { n: restored.playlists.length }));
       } else if (restored.playlist) {

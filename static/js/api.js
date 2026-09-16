@@ -49,15 +49,22 @@
   }
   ApiError.prototype = Object.create(Error.prototype);
 
-  async function request(method, path, body) {
+  async function request(method, path, body, rawBody) {
     var options = {
       method: method,
       headers: { 'Accept': 'application/json' },
       credentials: 'same-origin'
     };
     if (body !== undefined) {
-      options.headers['Content-Type'] = 'application/json';
-      options.body = JSON.stringify(body);
+      if (rawBody) {
+        // The CSV import: sent as text/csv, not JSON — everything else about
+        // the response (errors, the ApiError shape) is identical either way.
+        options.headers['Content-Type'] = 'text/csv';
+        options.body = body;
+      } else {
+        options.headers['Content-Type'] = 'application/json';
+        options.body = JSON.stringify(body);
+      }
     }
 
     var response;
@@ -146,6 +153,9 @@
     },
     importBackup: function (data) {
       return request('POST', '/api/playlists/import-backup', data);
+    },
+    importCsv: function (csvText, name) {
+      return request('POST', '/api/playlists/import-csv?name=' + encodeURIComponent(name), csvText, true);
     },
     removeFromPlaylist: function (id, key) {
       return request('DELETE', '/api/playlists/' + encodeURIComponent(id) +

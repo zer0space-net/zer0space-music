@@ -103,8 +103,10 @@
     'playlist.export': 'Exportieren',
     'playlist.exportAll': 'Alle exportieren',
     'playlist.importBackup': 'Backup importieren',
+    'playlist.importBackupHint': 'CSV-Datei (eine Zeile pro Song: Titel,Artist) für eine neue Playlist, oder eine JSON-Backup-Datei aus „Exportieren“.',
     'playlist.backupImported': '{n} Playlist(s) wiederhergestellt',
     'err.BAD_BACKUP': 'Das ist keine gültige zer0space-Music-Backup-Datei.',
+    'err.BAD_CSV': 'Die Datei ist kein gültiger Text (UTF-8).',
     'err.SPOTIFY_NO_MATCHES': 'Keiner dieser Songs wurde im Katalog gefunden.',
 
     'album.kind': 'Album',
@@ -257,8 +259,10 @@
     'playlist.export': 'Export',
     'playlist.exportAll': 'Export all',
     'playlist.importBackup': 'Import backup',
+    'playlist.importBackupHint': 'A CSV file (one song per line: title,artist) for a new playlist, or a JSON backup file from "Export".',
     'playlist.backupImported': '{n} playlist(s) restored',
     'err.BAD_BACKUP': 'Not a valid zer0space Music backup file.',
+    'err.BAD_CSV': 'The file is not valid text (UTF-8).',
     'err.SPOTIFY_NO_MATCHES': 'None of these songs were found in the catalogue.',
 
     'album.kind': 'Album',

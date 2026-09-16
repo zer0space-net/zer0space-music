@@ -200,34 +200,36 @@ Unlike the scraper, there is no `MUSIC_SPOTIFY_*` setting and nothing in
 `docker-compose.yml` — the feature works or it does not, per-request, with
 nothing an operator needs to set up first.
 
-### Past the 100-track cap: a title/artist list instead of a Spotify link
+### Past the 100-track cap: a CSV file instead of a Spotify link
 
 `playlist_import.import_track_list` (in the same module) is the escape hatch
 for the ceiling above — it runs the exact same Deezer matching pass, just
 against a list that never went through Spotify's page at all, so it is not
-subject to whatever cap that page imposes. Reached through the existing
-"Import backup" file picker in the UI (`POST /api/playlists/import-backup`
-in `main.py`), which tells this format apart from a real backup
-(`library.EXPORT_FORMAT_PLAYLIST`/`_LIBRARY`, key-per-track, no matching) by
-its declared `format`:
+subject to whatever cap that page imposes. Reached from the "Import backup"
+file picker in the UI — `POST /api/playlists/import-csv` in `main.py`, a
+separate route from the real-backup one (`import-backup`,
+`library.EXPORT_FORMAT_PLAYLIST`/`_LIBRARY`, key-per-track, no matching);
+the client tells the two apart by the file's own extension.
 
-```json
-{
-  "format": "zer0space-music-tracklist",
-  "name": "My playlist",
-  "description": "optional",
-  "tracks": [
-    { "title": "Song title", "artist": "Artist name" },
-    { "title": "Another song", "artist": "Another artist" }
-  ]
-}
+One song per line, no other syntax to get right — the point is that a
+person or an LLM can produce this without being told what JSON is:
+
+```csv
+title,artist
+Song title,Artist name
+Another song,Another artist
 ```
 
-`artist` and `description` are optional (an artist-less title still gets a
-title-only search); `duration` (seconds) is optional too and sharpens the
-match if known, but a hand-written or LLM-generated list never has it and
-the scorer works fine without it. Capped at `MAX_TRACKLIST_ENTRIES` (500)
-per file — one Deezer round trip per track, bounded by `MATCH_CONCURRENCY`.
+The header row is optional (recognised and skipped: `title`/`song`/`track`/
+`titel`, case-insensitive) and so is the artist column — an artist-less
+title still gets a title-only search, just with a smaller signal (see
+`_best_match`'s two-pass search above). `_parse_csv_tracks` in `main.py`
+parses it with the stdlib `csv` module rather than a hand-rolled split, so a
+title that itself contains a comma survives if it is quoted
+(`"Song, Part 2",Artist`). The playlist name comes from the uploaded
+file's own name (extension stripped, `_`/`-` read as spaces), since a CSV
+has nowhere else to carry one. Capped at `MAX_TRACKLIST_ENTRIES` (500) per
+file — one Deezer round trip per track, bounded by `MATCH_CONCURRENCY`.
 
 ---
 
