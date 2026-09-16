@@ -164,13 +164,25 @@ YouTube-style "strip `(Official Video)`" step needed.
 | Signal | Weight |
 |---|---|
 | Duration within 2 s | +6 |
-| Duration within 6 s | +4 sliding |
-| Duration off by >20 s | −4 |
+| Duration within 10 s | +4 sliding |
+| Duration off by >30 s | −2.5 (a penalty, not a hard reject) |
 | Title token overlap | up to +3 |
 | Artist name overlap | up to +3 |
 
-A candidate scoring ≤ 0 is reported as unmatched rather than added — see the
-module docstring in `playlist_import.py`.
+Wider duration tolerance than `ytmusic._score`'s 8s on purpose: that one
+matches a catalogue duration against a YouTube upload of the *same* master,
+this matches an external title against Deezer, which not infrequently
+indexes a different edit (radio edit vs. album version) as "the" track.
+
+`_best_match` also runs a second pass — a title-only search — whenever the
+"artist title" query comes back empty or scores ≤ 0 against everything it
+found. A mismatched artist string (feat. order, "&" vs "and", a collab
+credited differently between services, or no artist at all from a
+hand-written tracklist) was silently losing tracks Deezer does have.
+
+A candidate scoring ≤ 0 even after both passes is reported as unmatched
+rather than added — see the module docstring in `playlist_import.py`. The
+unmatched list is shown to the user after import, not just counted.
 
 ### The 100-track cap is Spotify's, not ours
 
@@ -187,6 +199,35 @@ this page shows it.
 Unlike the scraper, there is no `MUSIC_SPOTIFY_*` setting and nothing in
 `docker-compose.yml` — the feature works or it does not, per-request, with
 nothing an operator needs to set up first.
+
+### Past the 100-track cap: a title/artist list instead of a Spotify link
+
+`playlist_import.import_track_list` (in the same module) is the escape hatch
+for the ceiling above — it runs the exact same Deezer matching pass, just
+against a list that never went through Spotify's page at all, so it is not
+subject to whatever cap that page imposes. Reached through the existing
+"Import backup" file picker in the UI (`POST /api/playlists/import-backup`
+in `main.py`), which tells this format apart from a real backup
+(`library.EXPORT_FORMAT_PLAYLIST`/`_LIBRARY`, key-per-track, no matching) by
+its declared `format`:
+
+```json
+{
+  "format": "zer0space-music-tracklist",
+  "name": "My playlist",
+  "description": "optional",
+  "tracks": [
+    { "title": "Song title", "artist": "Artist name" },
+    { "title": "Another song", "artist": "Another artist" }
+  ]
+}
+```
+
+`artist` and `description` are optional (an artist-less title still gets a
+title-only search); `duration` (seconds) is optional too and sharpens the
+match if known, but a hand-written or LLM-generated list never has it and
+the scorer works fine without it. Capped at `MAX_TRACKLIST_ENTRIES` (500)
+per file — one Deezer round trip per track, bounded by `MATCH_CONCURRENCY`.
 
 ---
 

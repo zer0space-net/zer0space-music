@@ -580,6 +580,23 @@
     }
   }
 
+  // A toast auto-dismisses in a few seconds — no place to read a list of up
+  // to 200 titles. The modal is read-only (no input fields, so submitting it
+  // collects nothing) and only shown when there is something to show. Shared
+  // by the Spotify import and the matched-import half of "import backup"
+  // (a title/artist list with no catalogue key — see playlist_import.py).
+  function showUnmatched(unmatched) {
+    if (!unmatched || !unmatched.length) return;
+    openModal(
+      t('playlist.importUnmatchedTitle', { n: unmatched.length }),
+      '<p>' + esc(t('playlist.importUnmatchedIntro')) + '</p>' +
+      '<ul class="unmatched-list">' + unmatched.map(function (u) {
+        return '<li>' + esc(u.artist ? u.artist + ' – ' + u.title : u.title) + '</li>';
+      }).join('') + '</ul>',
+      t('common.close')
+    );
+  }
+
   async function promptImportSpotify() {
     var result = await openModal(t('playlist.importSpotify'),
       '<label for="pl-spotify-url">' + esc(t('playlist.importUrl')) + '</label>' +
@@ -603,20 +620,7 @@
       toast(message);
       await refreshPlaylists();
       window.location.hash = '#/playlist/' + encodeURIComponent(imported.playlist.id);
-      // A toast auto-dismisses in a few seconds — no place to read a list of
-      // up to 100 titles. The modal is read-only (no input fields, so
-      // submitting it collects nothing) and only shown when there is
-      // something to show.
-      if (imported.unmatched && imported.unmatched.length) {
-        openModal(
-          t('playlist.importUnmatchedTitle', { n: imported.unmatched.length }),
-          '<p>' + esc(t('playlist.importUnmatchedIntro')) + '</p>' +
-          '<ul class="unmatched-list">' + imported.unmatched.map(function (u) {
-            return '<li>' + esc(u.artist ? u.artist + ' – ' + u.title : u.title) + '</li>';
-          }).join('') + '</ul>',
-          t('common.close')
-        );
-      }
+      showUnmatched(imported.unmatched);
     } catch (err) {
       toast(I18N.tError(err.data || err), true);
     }
@@ -658,7 +662,20 @@
 
     try {
       var restored = await API.importBackup(payload);
-      toast(t('playlist.backupImported', { n: restored.playlists.length }));
+      // Two response shapes: a real backup (library.import_backup) restores
+      // one or more playlists verbatim and says so with a count. A title/
+      // artist list (no catalogue key at all — see playlist_import.py) goes
+      // through the same Deezer matching pass as the Spotify import, so it
+      // answers the same shape that does: one playlist, a matched/total
+      // count, and an unmatched list worth showing.
+      if (restored.playlists) {
+        toast(t('playlist.backupImported', { n: restored.playlists.length }));
+      } else if (restored.playlist) {
+        toast(t('playlist.importDone', {
+          name: restored.playlist.name, matched: restored.matched, total: restored.total
+        }));
+        showUnmatched(restored.unmatched);
+      }
       await refreshPlaylists();
     } catch (err) {
       toast(I18N.tError(err.data || err), true);

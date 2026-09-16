@@ -164,10 +164,11 @@ async def playlist(user_id: str, playlist_id: str) -> dict[str, Any]:
 
 # --- Backup: export / restore ------------------------------------------------
 #
-# Deliberately not the Spotify import's job: these tracks already carry our own
-# `key`, `artist.id`, etc. — a previous export, not a third-party title to
-# search the catalogue for — so restoring one is a straight create+add, no
-# matching involved.
+# These two formats are what this app's own export produces: every track
+# already carries our own `key`, `artist.id`, etc., so restoring one is a
+# straight create+add, no matching involved — unlike playlist_import.py's
+# EXPORT_FORMAT_TRACKLIST (a plain title/artist list, no key at all), which
+# main.py routes to playlist_import.import_track_list instead of here.
 
 EXPORT_FORMAT_PLAYLIST = "zer0space-music-playlist"
 EXPORT_FORMAT_LIBRARY = "zer0space-music-library"
