@@ -95,6 +95,11 @@
     'err.SPOTIFY_BAD_URL': 'Das sieht nicht nach einem Spotify-Playlist-Link aus.',
     'err.SPOTIFY_UNAVAILABLE': 'Spotify ist gerade nicht erreichbar, oder die Playlist ist privat.',
     'err.SPOTIFY_EMPTY': 'Diese Playlist enthält keine Songs.',
+    'playlist.export': 'Exportieren',
+    'playlist.exportAll': 'Alle exportieren',
+    'playlist.importBackup': 'Backup importieren',
+    'playlist.backupImported': '{n} Playlist(s) wiederhergestellt',
+    'err.BAD_BACKUP': 'Das ist keine gültige zer0space-Music-Backup-Datei.',
     'err.SPOTIFY_NO_MATCHES': 'Keiner dieser Songs wurde im Katalog gefunden.',
 
     'album.kind': 'Album',
@@ -226,6 +231,11 @@
     'err.SPOTIFY_BAD_URL': 'That does not look like a Spotify playlist link.',
     'err.SPOTIFY_UNAVAILABLE': 'Spotify is unreachable right now, or the playlist is private.',
     'err.SPOTIFY_EMPTY': 'That playlist has no songs.',
+    'playlist.export': 'Export',
+    'playlist.exportAll': 'Export all',
+    'playlist.importBackup': 'Import backup',
+    'playlist.backupImported': '{n} playlist(s) restored',
+    'err.BAD_BACKUP': 'Not a valid zer0space Music backup file.',
     'err.SPOTIFY_NO_MATCHES': 'None of these songs were found in the catalogue.',
 
     'album.kind': 'Album',

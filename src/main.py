@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -70,6 +71,42 @@ async def json_body(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ApiError(400, "BAD_JSON", "Expected a JSON object")
     return payload
+
+
+# A full-library backup (every playlist, every track) is a different shape of
+# request than the rest of this API — closer to an upload than a state edit —
+# so it gets its own, much larger cap rather than stretching MAX_BODY for
+# everyone. 2000 tracks (the playlist cap) at roughly 300 bytes each is already
+# past 512 kB for a single playlist.
+MAX_BACKUP_BODY = 8 * 1024 * 1024
+
+
+async def backup_body(request: Request) -> dict[str, Any]:
+    raw = await request.body()
+    if len(raw) > MAX_BACKUP_BODY:
+        raise ApiError(413, "BODY_TOO_LARGE", "Backup file too large")
+    if not raw:
+        raise ApiError(400, "BAD_JSON", "Empty backup file")
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        raise ApiError(400, "BAD_JSON", "Malformed JSON body") from None
+    if not isinstance(payload, dict):
+        raise ApiError(400, "BAD_JSON", "Expected a JSON object")
+    return payload
+
+
+_UNSAFE_FILENAME = re.compile(r"[^A-Za-z0-9 _.-]+")
+
+
+def _download(data: dict[str, Any], filename: str) -> Response:
+    body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+    safe_name = (_UNSAFE_FILENAME.sub("", filename).strip() or "backup.json")[:150]
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
 
 
 def me(request: Request) -> str:
@@ -474,9 +511,31 @@ async def api_import_spotify_playlist(request: Request) -> dict[str, Any]:
     return await playlist_import.import_spotify_playlist(user, str(payload.get("url") or ""))
 
 
+@app.get("/api/playlists/export", include_in_schema=False)
+async def api_export_library(request: Request) -> Response:
+    """Every playlist as one file — a real backup, not a share link."""
+    data = await library.export_library(me(request))
+    return _download(data, "zer0space-music-backup.json")
+
+
+@app.post("/api/playlists/import-backup", include_in_schema=False)
+async def api_import_backup(request: Request) -> dict[str, Any]:
+    """Restores playlists from a file this same export produced. Unlike the
+    Spotify import, tracks here already carry our own key — no catalogue
+    matching, straight create+add. See library.import_backup."""
+    payload = await backup_body(request)
+    return await library.import_backup(me(request), payload)
+
+
 @app.get("/api/playlists/{playlist_id}", include_in_schema=False)
 async def api_playlist(request: Request, playlist_id: str) -> dict[str, Any]:
     return await library.playlist(me(request), playlist_id)
+
+
+@app.get("/api/playlists/{playlist_id}/export", include_in_schema=False)
+async def api_export_playlist(request: Request, playlist_id: str) -> Response:
+    data = await library.export_playlist(me(request), playlist_id)
+    return _download(data, str(data["name"]) + ".json")
 
 
 @app.patch("/api/playlists/{playlist_id}", include_in_schema=False)

@@ -162,6 +162,96 @@ async def playlist(user_id: str, playlist_id: str) -> dict[str, Any]:
     }
 
 
+# --- Backup: export / restore ------------------------------------------------
+#
+# Deliberately not the Spotify import's job: these tracks already carry our own
+# `key`, `artist.id`, etc. — a previous export, not a third-party title to
+# search the catalogue for — so restoring one is a straight create+add, no
+# matching involved.
+
+EXPORT_FORMAT_PLAYLIST = "zer0space-music-playlist"
+EXPORT_FORMAT_LIBRARY = "zer0space-music-library"
+EXPORT_VERSION = 1
+MAX_IMPORT_PLAYLISTS = 50
+
+
+async def export_playlist(user_id: str, playlist_id: str) -> dict[str, Any]:
+    data = await playlist(user_id, playlist_id)  # raises NOT_FOUND if missing or not owned
+    return {
+        "format": EXPORT_FORMAT_PLAYLIST,
+        "version": EXPORT_VERSION,
+        "name": data["name"],
+        "description": data["description"],
+        "tracks": data["tracks"],
+    }
+
+
+async def export_library(user_id: str) -> dict[str, Any]:
+    """Every playlist, tracks included, in one query rather than one per playlist."""
+    rows = await db.fetch(
+        """
+        SELECT p.name, p.description,
+               COALESCE(
+                   jsonb_agg(t.track ORDER BY t.position) FILTER (WHERE t.track IS NOT NULL),
+                   '[]'::jsonb
+               ) AS tracks
+          FROM playlist p
+          LEFT JOIN playlist_track t ON t.playlist_id = p.id
+         WHERE p.user_id = $1
+         GROUP BY p.id
+         ORDER BY p.updated_at DESC
+        """,
+        user_id,
+    )
+    return {
+        "format": EXPORT_FORMAT_LIBRARY,
+        "version": EXPORT_VERSION,
+        "playlists": [
+            {"name": row["name"], "description": row["description"], "tracks": row["tracks"]}
+            for row in rows
+        ],
+    }
+
+
+async def import_backup(user_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Restores one or every playlist from a file this same export produced.
+
+    An entry with no tracks is skipped rather than failing the whole restore —
+    the file may be hand-edited, or a playlist that was already empty when
+    exported — and only if nothing at all could be restored is that an error.
+    """
+    fmt = payload.get("format")
+    if fmt == EXPORT_FORMAT_PLAYLIST:
+        entries = [payload]
+    elif fmt == EXPORT_FORMAT_LIBRARY:
+        entries = payload.get("playlists")
+        if not isinstance(entries, list):
+            entries = []
+    else:
+        raise LibraryError("BAD_BACKUP", "Not a zer0space Music backup file")
+    if not entries:
+        raise LibraryError("BAD_BACKUP", "That backup has no playlists")
+    if len(entries) > MAX_IMPORT_PLAYLISTS:
+        raise LibraryError("TOO_MANY", "Too many playlists in one backup")
+
+    created: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        tracks = entry.get("tracks")
+        if not isinstance(tracks, list) or not tracks:
+            continue
+        restored = await create_playlist(
+            user_id, str(entry.get("name") or "Imported playlist"), str(entry.get("description") or "")
+        )
+        restored["trackCount"] = await add_tracks(user_id, restored["id"], tracks[:MAX_PLAYLIST_TRACKS])
+        created.append(restored)
+
+    if not created:
+        raise LibraryError("BAD_BACKUP", "No playlists could be restored from that file")
+    return {"playlists": created}
+
+
 def _pid(raw: str) -> int:
     try:
         return int(str(raw).strip())

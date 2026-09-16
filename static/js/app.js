@@ -388,7 +388,11 @@
           '<p class="card-sub">' + esc(sub) + '</p></a>';
       }).join('') + '</div>',
       '<button type="button" class="btn btn-ghost btn-sm" id="lib-new">' +
-        esc(t('playlist.create')) + '</button>');
+        esc(t('playlist.create')) + '</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="lib-export-all">' +
+        esc(t('playlist.exportAll')) + '</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="lib-import-backup">' +
+        esc(t('playlist.importBackup')) + '</button>');
 
     if (data.recent.length) {
       html += sectionHtml('library.recent', trackListHtml(data.recent.slice(0, 20)));
@@ -397,6 +401,10 @@
 
     var newBtn = document.getElementById('lib-new');
     if (newBtn) newBtn.addEventListener('click', promptNewPlaylist);
+    var exportAllBtn = document.getElementById('lib-export-all');
+    if (exportAllBtn) exportAllBtn.addEventListener('click', exportAllPlaylists);
+    var importBackupBtn = document.getElementById('lib-import-backup');
+    if (importBackupBtn) importBackupBtn.addEventListener('click', promptImportBackup);
   }
 
   function detailHead(options) {
@@ -417,6 +425,8 @@
     if (options.ownId) {
       actions += '<button type="button" class="btn btn-ghost btn-sm" data-rename="' +
         esc(options.ownId) + '">' + esc(t('common.rename')) + '</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-export-playlist="' +
+        esc(options.ownId) + '">' + esc(t('playlist.export')) + '</button>' +
         '<button type="button" class="btn btn-ghost btn-sm" data-delete-playlist="' +
         esc(options.ownId) + '">' + esc(t('common.delete')) + '</button>';
     }
@@ -534,7 +544,7 @@
     event.preventDefault();
     var data = {};
     modal.querySelectorAll('input, textarea').forEach(function (field) {
-      data[field.name] = field.value;
+      data[field.name] = field.type === 'file' ? field.files[0] : field.value;
     });
     closeModal(data);
   });
@@ -587,6 +597,49 @@
       toast(message);
       await refreshPlaylists();
       window.location.hash = '#/playlist/' + encodeURIComponent(imported.playlist.id);
+    } catch (err) {
+      toast(I18N.tError(err.data || err), true);
+    }
+  }
+
+  /* Content-Disposition: attachment on the response is what turns this into a
+     download rather than a navigation — the browser never actually leaves the
+     page. Cookies (and therefore the gateway's identity headers) travel with
+     a plain navigation exactly like a fetch(), so no special auth handling. */
+  function exportPlaylist(id) {
+    window.location.href = API.url('/api/playlists/' + encodeURIComponent(id) + '/export');
+  }
+
+  function exportAllPlaylists() {
+    window.location.href = API.url('/api/playlists/export');
+  }
+
+  async function promptImportBackup() {
+    var result = await openModal(t('playlist.importBackup'),
+      '<input type="file" id="pl-backup-file" name="file" accept="application/json,.json" required>',
+      t('common.create'));
+    if (!result || !result.file) return;
+
+    var text;
+    try {
+      text = await result.file.text();
+    } catch (err) {
+      toast(I18N.tError({ code: 'BAD_BACKUP' }), true);
+      return;
+    }
+
+    var payload;
+    try {
+      payload = JSON.parse(text);
+    } catch (err) {
+      toast(I18N.tError({ code: 'BAD_BACKUP' }), true);
+      return;
+    }
+
+    try {
+      var restored = await API.importBackup(payload);
+      toast(t('playlist.backupImported', { n: restored.playlists.length }));
+      await refreshPlaylists();
     } catch (err) {
       toast(I18N.tError(err.data || err), true);
     }
@@ -735,6 +788,9 @@
 
     var rename = event.target.closest('[data-rename]');
     if (rename) return void renamePlaylist(rename.dataset.rename);
+
+    var exportOne = event.target.closest('[data-export-playlist]');
+    if (exportOne) return void exportPlaylist(exportOne.dataset.exportPlaylist);
 
     var remove = event.target.closest('[data-delete-playlist]');
     if (remove) return void deletePlaylist(remove.dataset.deletePlaylist);

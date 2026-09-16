@@ -144,6 +144,9 @@
     importSpotifyPlaylist: function (url) {
       return request('POST', '/api/playlists/import-spotify', { url: url });
     },
+    importBackup: function (data) {
+      return request('POST', '/api/playlists/import-backup', data);
+    },
     removeFromPlaylist: function (id, key) {
       return request('DELETE', '/api/playlists/' + encodeURIComponent(id) +
         '/tracks/' + encodeURIComponent(key));
