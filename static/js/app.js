@@ -76,7 +76,9 @@
       '<a class="card" href="' + href + '">' +
         '<div class="card-art' + (kind === 'artist' ? ' round' : '') + '">' +
           '<img loading="lazy" src="' + esc(cover(item.cover || item.picture)) + '" alt="">' +
-          (kind === 'artist' ? '' :
+          // No quick-play button for an artist (nothing to play) or a
+          // podcast (an episode list, not a single queueable thing).
+          (kind === 'artist' || kind === 'podcast' ? '' :
             '<button type="button" class="card-play" data-play-' + kind + '="' + esc(item.id) + '" ' +
             'aria-label="' + esc(t('player.play')) + '">' +
             '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">' +
@@ -407,6 +409,98 @@
     if (importBackupBtn) importBackupBtn.addEventListener('click', promptImportBackup);
   }
 
+  // --- Podcasts --------------------------------------------------------
+  //
+  // A separate content type from the catalogue on purpose (see podcasts.py):
+  // an episode is played the same way a track is (Player.playQueue etc, one
+  // <audio> element, the same /api/stream + /media relay), but nothing here
+  // is ever liked into "songs" or matched against Deezer. episodeToTrack()
+  // is the one seam — it shapes an episode into whatever trackRowHtml and
+  // the player actually read (key, title, artist.name, duration, cover) —
+  // deliberately not a full Track, since an episode has no album and is
+  // never a Deezer/YouTube match.
+
+  function episodeToTrack(episode, podcastTitle) {
+    return {
+      key: episode.key,
+      title: episode.title,
+      artist: { id: '', name: podcastTitle, picture: '' },
+      album: null,
+      duration: episode.duration,
+      cover: episode.cover,
+      explicit: false
+    };
+  }
+
+  async function viewPodcasts() {
+    loading();
+    var data;
+    try { data = await API.podcasts(); } catch (err) { return errorView(err); }
+
+    var html = '<h1 class="greeting">' + esc(t('podcast.title')) + '</h1>';
+    html += sectionHtml('podcast.subscriptions',
+      data.podcasts.length
+        ? '<div class="grid">' + data.podcasts.map(function (p) {
+            return cardHtml(p, 'podcast', '');
+          }).join('') + '</div>'
+        : '<div class="empty"><p>' + esc(t('podcast.none')) + '</p></div>',
+      '<button type="button" class="btn btn-ghost btn-sm" id="podcast-subscribe">' +
+        esc(t('podcast.subscribe')) + '</button>');
+    view.innerHTML = html;
+
+    var subscribeBtn = document.getElementById('podcast-subscribe');
+    if (subscribeBtn) subscribeBtn.addEventListener('click', promptSubscribePodcast);
+  }
+
+  async function viewPodcast(id) {
+    loading();
+    var data;
+    try { data = await API.podcastEpisodes(id); } catch (err) { return errorView(err); }
+    var tracks = data.episodes.map(function (ep) { return episodeToTrack(ep, data.title); });
+    remember(tracks);
+
+    var html = detailHead({
+      kind: t('podcast.kind'),
+      title: data.title,
+      sub: countLabel(data.episodes.length),
+      art: data.cover,
+      playAll: tracks.length ? 'podcast' : '',
+      noShuffle: true,
+      unsubscribeId: id
+    });
+    html += tracks.length
+      ? trackListHtml(tracks)
+      : '<div class="empty"><p>' + esc(t('podcast.empty')) + '</p></div>';
+    view.innerHTML = html;
+  }
+
+  async function promptSubscribePodcast() {
+    var result = await openModal(t('podcast.subscribe'),
+      '<label for="podcast-url">' + esc(t('podcast.feedUrl')) + '</label>' +
+      '<input type="text" id="podcast-url" name="url" required placeholder="' +
+      esc(t('podcast.feedUrlPh')) + '">',
+      t('common.create'));
+    if (!result || !result.url.trim()) return;
+
+    try {
+      await API.subscribePodcast(result.url.trim());
+      toast(t('podcast.subscribed'));
+      await viewPodcasts();
+    } catch (err) {
+      toast(I18N.tError(err.data || err), true);
+    }
+  }
+
+  async function unsubscribePodcast(id) {
+    try {
+      await API.unsubscribePodcast(id);
+      toast(t('podcast.unsubscribed'));
+      location.hash = '#/podcasts';
+    } catch (err) {
+      toast(I18N.tError(err.data || err), true);
+    }
+  }
+
   function detailHead(options) {
     var artHtml = options.liked
       ? '<div class="detail-art lib-cover-liked" style="display:grid;place-items:center">' +
@@ -420,13 +514,17 @@
       actions += '<button type="button" class="btn-play-big" id="play-all" ' +
         'aria-label="' + esc(t('player.play')) + '">' +
         '<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">' +
-        '<path d="M8 5.2 19 12 8 18.8z"/></svg></button>' +
-        '<button type="button" class="btn-icon" id="shuffle-all" ' +
-        'aria-label="' + esc(t('playlist.shufflePlay')) + '" title="' + esc(t('playlist.shufflePlay')) + '">' +
-        '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" ' +
-        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-        '<path d="M4 6h3.6l7 12H18M4 18h3.6l2.4-4.1M15 6h3M15 18h3"/>' +
-        '<path d="m16 4 2 2-2 2M16 16l2 2-2 2"/></svg></button>';
+        '<path d="M8 5.2 19 12 8 18.8z"/></svg></button>';
+      // Shuffling an episode list makes no sense — a podcast is listened to
+      // in order — so this is the one playAll caller that opts out of it.
+      if (!options.noShuffle) {
+        actions += '<button type="button" class="btn-icon" id="shuffle-all" ' +
+          'aria-label="' + esc(t('playlist.shufflePlay')) + '" title="' + esc(t('playlist.shufflePlay')) + '">' +
+          '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+          'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+          '<path d="M4 6h3.6l7 12H18M4 18h3.6l2.4-4.1M15 6h3M15 18h3"/>' +
+          '<path d="m16 4 2 2-2 2M16 16l2 2-2 2"/></svg></button>';
+      }
     }
     if (options.ownId) {
       actions += '<button type="button" class="btn btn-ghost btn-sm" data-rename="' +
@@ -435,6 +533,10 @@
         esc(options.ownId) + '">' + esc(t('playlist.export')) + '</button>' +
         '<button type="button" class="btn btn-ghost btn-sm" data-delete-playlist="' +
         esc(options.ownId) + '">' + esc(t('common.delete')) + '</button>';
+    }
+    if (options.unsubscribeId) {
+      actions += '<button type="button" class="btn btn-ghost btn-sm" data-unsubscribe-podcast="' +
+        esc(options.unsubscribeId) + '">' + esc(t('podcast.unsubscribe')) + '</button>';
     }
 
     return '' +
@@ -850,6 +952,9 @@
     var remove = event.target.closest('[data-delete-playlist]');
     if (remove) return void deletePlaylist(remove.dataset.deletePlaylist);
 
+    var unsubscribe = event.target.closest('[data-unsubscribe-podcast]');
+    if (unsubscribe) return void unsubscribePodcast(unsubscribe.dataset.unsubscribePodcast);
+
     var row = event.target.closest('.track-row');
     if (row && !event.target.closest('a')) playFromRow(row);
   });
@@ -979,6 +1084,8 @@
       case 'catalog-playlist': await viewCatalogPlaylist(target.arg); break;
       case 'liked': await viewLiked(); break;
       case 'library': await viewLibrary(); break;
+      case 'podcasts': await viewPodcasts(); break;
+      case 'podcast': await viewPodcast(target.arg); break;
       default: await viewHome();
     }
     refreshLikeButtons();

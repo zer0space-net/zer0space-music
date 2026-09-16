@@ -152,6 +152,22 @@ SCHEMA: tuple[str, ...] = (
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
     """,
+    # Podcasts are never mirrored here beyond this — no episodes table. The
+    # feed itself is the source of truth (see src/podcasts.py); this row just
+    # remembers which feeds a user subscribed to and what to show before the
+    # feed has been fetched.
+    """
+    CREATE TABLE IF NOT EXISTS podcast_subscription (
+        id         BIGSERIAL   PRIMARY KEY,
+        user_id    TEXT        NOT NULL,
+        feed_url   TEXT        NOT NULL,
+        title      TEXT        NOT NULL,
+        cover      TEXT,
+        added_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        UNIQUE (user_id, feed_url)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS podcast_subscription_user ON podcast_subscription (user_id, added_at DESC)",
 )
 
 

@@ -155,6 +155,12 @@
     // --- Session continuity
     getState: function () { return request('GET', '/api/state'); },
     saveState: function (state) { return request('POST', '/api/state', state); },
-    savePrefs: function (prefs) { return request('POST', '/api/prefs', prefs); }
+    savePrefs: function (prefs) { return request('POST', '/api/prefs', prefs); },
+
+    // --- Podcasts
+    podcasts: function () { return request('GET', '/api/podcasts'); },
+    subscribePodcast: function (url) { return request('POST', '/api/podcasts', { url: url }); },
+    unsubscribePodcast: function (id) { return request('DELETE', '/api/podcasts/' + encodeURIComponent(id)); },
+    podcastEpisodes: function (id) { return request('GET', '/api/podcasts/' + encodeURIComponent(id) + '/episodes'); }
   };
 })();

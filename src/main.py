@@ -23,7 +23,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import cache, config, db, identity, library, playlist_import, resolve, stream
+from . import cache, config, db, identity, library, playlist_import, podcasts, resolve, stream
 from .providers import deezer
 
 app = FastAPI(
@@ -142,7 +142,8 @@ async def _shutdown() -> None:
         with contextlib.suppress(asyncio.CancelledError):
             await task
     await asyncio.gather(
-        deezer.close(), stream.close(), playlist_import.close(), db.close(), return_exceptions=True
+        deezer.close(), stream.close(), playlist_import.close(), podcasts.close(), db.close(),
+        return_exceptions=True,
     )
 
 
@@ -184,6 +185,13 @@ async def _catalog_down(request: Request, exc: Exception) -> Response:
 @app.exception_handler(library.LibraryError)
 async def _library_error(_request: Request, exc: Exception) -> Response:
     err = exc if isinstance(exc, library.LibraryError) else None
+    status = 404 if err and err.code == "NOT_FOUND" else 400
+    return fail(status, err.code if err else "BAD_REQUEST", str(exc))
+
+
+@app.exception_handler(podcasts.PodcastError)
+async def _podcast_error(_request: Request, exc: Exception) -> Response:
+    err = exc if isinstance(exc, podcasts.PodcastError) else None
     status = 404 if err and err.code == "NOT_FOUND" else 400
     return fail(status, err.code if err else "BAD_REQUEST", str(exc))
 
@@ -380,6 +388,17 @@ async def api_genre(request: Request, genre_id: str) -> dict[str, Any]:
 # --- Playback ---------------------------------------------------------------
 
 
+def _media_root(request: Request) -> str:
+    """This origin, with the gateway's forwarded prefix — what a same-origin
+    URL handed to the browser (a stream ticket, a relayed podcast cover) has
+    to be built on rather than a root-relative path, since the dashboard
+    mounts this app under /music and a bare "/api/..." would resolve against
+    the dashboard's own origin instead."""
+    base = identity.base_path(request)
+    base = "" if base == "/" else base
+    return config.MEDIA_BASE_URL or f"{identity.public_origin(request)}{base}"
+
+
 @app.get("/api/stream/{track_key:path}", include_in_schema=False)
 async def api_stream(request: Request, track_key: str) -> dict[str, Any]:
     """Mint a stream ticket for one track and say where to play it.
@@ -389,24 +408,34 @@ async def api_stream(request: Request, track_key: str) -> dict[str, Any]:
     playback work on a phone.
     """
     user = me(request)
-    try:
-        track = await resolve.track_for_key(track_key)
-    except resolve.UnknownTrack:
-        raise ApiError(404, "UNKNOWN_TRACK", "No such track") from None
 
-    source = await resolve.source_for(track)
-    if source is None:
-        raise ApiError(404, "NO_SOURCE", "No playable source found for this track")
+    # A podcast key (podcast:<subscription id>:<guid hash>) never goes near
+    # resolve.py — there is no catalogue lookup or scraper involved, the feed
+    # already names a direct, playable URL. Same ticket + /media relay either
+    # way, which is what lets the player treat an episode as an ordinary
+    # track without knowing the difference.
+    if track_key.startswith("podcast:"):
+        source = await podcasts.resolve_episode(user, track_key)
+        if source is None:
+            raise ApiError(404, "NO_SOURCE", "No playable source found for this episode")
+        duration = source.duration
+    else:
+        try:
+            track = await resolve.track_for_key(track_key)
+        except resolve.UnknownTrack:
+            raise ApiError(404, "UNKNOWN_TRACK", "No such track") from None
+        source = await resolve.source_for(track)
+        if source is None:
+            raise ApiError(404, "NO_SOURCE", "No playable source found for this track")
+        duration = source.duration or track.duration
 
-    base = identity.base_path(request)
-    base = "" if base == "/" else base
-    media_root = config.MEDIA_BASE_URL or f"{identity.public_origin(request)}{base}"
-    ticket = stream.mint(track.key, user)
+    media_root = _media_root(request)
+    ticket = stream.mint(track_key, user)
 
     return {
         "url": f"{media_root}/media/{ticket}",
         "mime": source.mime,
-        "duration": source.duration or track.duration,
+        "duration": duration,
         "provider": source.provider,
         # The UI says so out loud rather than letting a 30-second track look
         # like a buggy full one.
@@ -438,7 +467,13 @@ async def media(request: Request, ticket: str) -> Response:
     redeemed = stream.redeem(ticket)
     if redeemed is None:
         return fail(403, "BAD_TICKET", "Stream ticket missing, expired or invalid")
-    track_key, _user = redeemed
+    track_key, user = redeemed
+
+    if track_key.startswith("podcast:"):
+        source = await podcasts.resolve_episode(user, track_key)
+        if source is None:
+            return fail(404, "NO_SOURCE", "No playable source found for this episode")
+        return await stream.relay(request, source)
 
     try:
         track = await resolve.track_for_key(track_key)
@@ -624,3 +659,60 @@ async def api_prefs(request: Request) -> dict[str, Any]:
     user = me(request)
     payload = await json_body(request)
     return {"prefs": await library.save_prefs(user, payload)}
+
+
+# --- Podcasts -----------------------------------------------------------
+#
+# A different content type on purpose: episodes are never fed through the
+# catalogue or the scraper (see podcasts.py) — an RSS enclosure is already a
+# direct, playable URL. /api/stream and /media above are the only place the
+# two worlds meet, branching on the "podcast:" key prefix.
+
+
+@app.get("/api/podcasts", include_in_schema=False)
+async def api_podcasts(request: Request) -> dict[str, Any]:
+    subs = await podcasts.subscriptions(me(request))
+    root = _media_root(request)
+    for sub in subs:
+        sub["cover"] = f"{root}/api/podcasts/{sub['id']}/cover" if sub.pop("hasCover") else ""
+    return {"podcasts": subs}
+
+
+@app.post("/api/podcasts", include_in_schema=False)
+async def api_podcast_subscribe(request: Request) -> dict[str, Any]:
+    user = me(request)
+    payload = await json_body(request)
+    sub = await podcasts.subscribe(user, str(payload.get("url") or ""))
+    sub["cover"] = f"{_media_root(request)}/api/podcasts/{sub['id']}/cover" if sub.pop("hasCover") else ""
+    return sub
+
+
+@app.delete("/api/podcasts/{subscription_id}", include_in_schema=False)
+async def api_podcast_unsubscribe(request: Request, subscription_id: str) -> dict[str, str]:
+    await podcasts.unsubscribe(me(request), subscription_id)
+    return {"status": "ok"}
+
+
+@app.get("/api/podcasts/{subscription_id}/episodes", include_in_schema=False)
+async def api_podcast_episodes(request: Request, subscription_id: str) -> dict[str, Any]:
+    data = await podcasts.episodes(me(request), subscription_id)
+    cover = f"{_media_root(request)}/api/podcasts/{data['id']}/cover" if data.pop("hasCover") else ""
+    data["cover"] = cover
+    for episode in data["episodes"]:
+        episode["cover"] = cover
+    return data
+
+
+@app.get("/api/podcasts/{subscription_id}/cover", include_in_schema=False)
+async def api_podcast_cover(request: Request, subscription_id: str) -> Response:
+    """Relays the show's own cover art same-origin — see fetch_image's
+    docstring for why this can't just be an <img src> to the feed's host."""
+    fetched = await podcasts.cover_bytes(me(request), subscription_id)
+    if fetched is None:
+        return Response(status_code=404)
+    body, content_type = fetched
+    return Response(
+        content=body,
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
