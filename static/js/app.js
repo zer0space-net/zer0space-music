@@ -1252,7 +1252,7 @@
     /* The service worker only caches the app shell — never audio, never API
        responses. See static/sw.js for why. */
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register(API.base + '/static/sw.js', { scope: API.base + '/' })
+      navigator.serviceWorker.register(API.base + '/sw.js', { scope: API.base + '/' })
         .catch(function () { /* non-fatal: the app works without it */ });
     }
   }

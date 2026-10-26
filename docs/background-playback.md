@@ -106,6 +106,12 @@ the prefix matters twice.
 icon. It explicitly does **not** touch `/api/`, `/media/`, or any request
 carrying a `Range` header.
 
+It is served at `/music/sw.js` by a route in `src/main.py`, not from
+`/music/static/sw.js`. A worker's scope cannot reach above its own directory, so
+the `/static/` copy could only control `/music/static/` and its registration for
+`/music/` was rejected. The `Service-Worker-Allowed` header would also work, but
+the gateway relays response headers from an allowlist.
+
 **Why not audio.** Three reasons, any one of them sufficient: stream URLs are
 per-user capabilities with an expiry; a cache would quietly fill the phone with
 music nobody asked to download; and a worker that does not implement 206

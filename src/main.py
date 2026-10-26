@@ -21,7 +21,7 @@ import re
 from typing import Any
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -290,6 +290,22 @@ async def manifest(request: Request) -> Response:
             ],
         },
         headers={"Content-Type": "application/manifest+json"},
+    )
+
+
+@app.get("/sw.js", include_in_schema=False)
+async def service_worker() -> FileResponse:
+    """Served from the mount root, not /static/.
+
+    A worker's scope may not reach above its own URL's directory, so the copy
+    under /static/ could only ever control /music/static/ and registering it for
+    /music/ fails. The Service-Worker-Allowed header would lift that, but the
+    dashboard gateway relays response headers from an allowlist.
+    """
+    return FileResponse(
+        "static/sw.js",
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-cache"},
     )
 
 

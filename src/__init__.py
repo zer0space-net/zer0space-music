@@ -12,4 +12,4 @@ scraper in :mod:`src.providers.ytmusic` and relayed by :mod:`src.stream`.
 # tab that already has the app open. This was unused dead weight in the
 # template until a real user hit exactly that: literal "nav.podcasts" text
 # and the wrong view, both stale JS served from before those existed.
-__version__ = "1.1.0"
+__version__ = "1.1.1"
